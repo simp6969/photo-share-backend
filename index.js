@@ -18,10 +18,7 @@ app.use(cors());
 // Routes
 app.use("/api", uploadRoutes);
 
-app.get("/photo", (req, res) => {
-  const bucket = getBucket();
-  
-});
+app.get("/",(req,res)=>{ res.status(200) ;res.send("psdaoaoaoaoo")})
 
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
