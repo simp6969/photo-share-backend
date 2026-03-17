@@ -107,17 +107,16 @@ router.get("/image/:fileId", async (req, res) => {
 
 /**
  * @route GET /photos
- * @description Retrieves all photo metadata in a randomized order.
+ * @description Retrieves photo metadata in descending order with pagination.
  */
 router.get("/photos", async (req, res) => {
   try {
-    const photos = await PhotoModel.find({});
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
 
-    // Fischer-Yates Shuffle for randomization
-    for (let i = photos.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [photos[i], photos[j]] = [photos[j], photos[i]];
-    }
+    // Fetch photos sorted by newest first with pagination
+    const photos = await PhotoModel.find({}).sort({ _id: -1 }).skip(skip).limit(limit);
 
     res.status(200).json(photos);
   } catch (error) {
