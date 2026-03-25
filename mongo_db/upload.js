@@ -6,6 +6,7 @@ const mongoose = require("mongoose");
 const { getGfs } = require("../mongo_db/mongodb");
 const { PhotoModel } = require("../mongo_db/user");
 const { v4: uuidv4 } = require("uuid");
+const sharp = require("sharp");
 
 // Use memory storage with multer
 const storage = multer.memoryStorage();
@@ -15,26 +16,35 @@ const upload = multer({ storage });
  * @route POST /upload
  * @description Uploads an image file to GridFS and creates a metadata document.
  */
-router.post("/upload", upload.single("photo"), (req, res) => {
+router.post("/upload", upload.single("photo"), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ message: "No file uploaded." });
   }
 
   const gfs = getGfs();
-  const { originalname, mimetype, buffer } = req.file;
+  const { originalname, buffer } = req.file;
   const { username } = req.body;
 
-  // Create a readable stream from the buffer
-  const readablePhotoStream = new Readable();
-  readablePhotoStream.push(buffer);
-  readablePhotoStream.push(null);
+  try {
+    // Process image with sharp: convert to webp and compress
+    const processedBuffer = await sharp(buffer)
+      .webp({ quality: 80 })
+      .toBuffer();
 
-  const uploadStream = gfs.openUploadStream(originalname, {
-    contentType: mimetype,
-    metadata: { username },
-  });
+    const newFilename = `${originalname.split('.')[0]}.webp`;
+    const newMimetype = "image/webp";
 
-  readablePhotoStream.pipe(uploadStream);
+    // Create a readable stream from the processed buffer
+    const readablePhotoStream = new Readable();
+    readablePhotoStream.push(processedBuffer);
+    readablePhotoStream.push(null);
+
+    const uploadStream = gfs.openUploadStream(newFilename, {
+      contentType: newMimetype,
+      metadata: { username },
+    });
+
+    readablePhotoStream.pipe(uploadStream);
 
   uploadStream.on("error", (error) => {
     console.error("GridFS upload error:", error);
@@ -45,8 +55,8 @@ router.post("/upload", upload.single("photo"), (req, res) => {
     try {
       const photoDoc = new PhotoModel({
         fileId: uploadStream.id,
-        filename: originalname,
-        contentType: mimetype,
+        filename: newFilename,
+        contentType: newMimetype,
         username: username,
         uniqueID: uuidv4(),
         views: 0,
@@ -73,6 +83,10 @@ router.post("/upload", upload.single("photo"), (req, res) => {
       res.status(500).json({ message: "Error saving photo metadata." });
     }
   });
+  } catch (error) {
+    console.error("Error processing image:", error);
+    res.status(500).json({ message: "Error processing image upload." });
+  }
 });
 
 /**
