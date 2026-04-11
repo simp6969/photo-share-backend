@@ -1,4 +1,4 @@
-const { model, Schema } = require("mongoose");
+import { model, Schema } from "mongoose";
 
 const PhotoSchema = new Schema({
   fileId: Schema.Types.ObjectId,
@@ -11,4 +11,4 @@ const PhotoSchema = new Schema({
 
 const PhotoModel = model("mainDB", PhotoSchema);
 
-module.exports = { PhotoModel };
+export { PhotoModel };

@@ -1,11 +1,12 @@
-const mongoose = require("mongoose");
-const { GridFSBucket } = require("mongodb");
-require("dotenv").config();
+import mongoose from "mongoose";
+import { GridFSBucket } from "mongodb";
+import { configDotenv } from "dotenv";
+const dotenv = configDotenv();
 const url = process.env.MONGO_DB_CONNECTION_STRING;
 
 let gfs;
 
-const connect = async () => {
+export const connect = async () => {
   try {
     await mongoose.connect(url);
     const db = mongoose.connection.db;
@@ -19,9 +20,7 @@ const connect = async () => {
   }
 };
 
-const getGfs = () => {
+export const getGfs = () => {
   if (!gfs) throw new Error("GridFS not initialized.");
   return gfs;
 };
-
-module.exports = { connect, getGfs };

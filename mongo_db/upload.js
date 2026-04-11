@@ -1,13 +1,20 @@
-const express = require("express");
-const router = express.Router();
-const multer = require("multer");
-const { Readable } = require("stream");
-const mongoose = require("mongoose");
-const { getGfs } = require("../mongo_db/mongodb");
-const { PhotoModel } = require("../mongo_db/user");
-const { v4: uuidv4 } = require("uuid");
-const sharp = require("sharp");
+import express from "express";
+import multer from "multer";
+import { Readable } from "stream";
+import mongoose from "mongoose";
+import { v4 as uuidv4 } from "uuid";
+import sharp from "sharp";
 
+// Local imports - MUST include the .js extension
+import { getGfs } from "../mongo_db/mongodb.js";
+import { PhotoModel } from "../mongo_db/user.js";
+
+// Initialize the router
+const router = express.Router();
+
+// ... your route logic goes here (e.g., router.post('/upload', ...))
+
+export default router;
 // Use memory storage with multer
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
@@ -31,7 +38,7 @@ router.post("/upload", upload.single("photo"), async (req, res) => {
       .webp({ quality: 80 })
       .toBuffer();
 
-    const newFilename = `${originalname.split('.')[0]}.webp`;
+    const newFilename = `${originalname.split(".")[0]}.webp`;
     const newMimetype = "image/webp";
 
     // Create a readable stream from the processed buffer
@@ -46,43 +53,43 @@ router.post("/upload", upload.single("photo"), async (req, res) => {
 
     readablePhotoStream.pipe(uploadStream);
 
-  uploadStream.on("error", (error) => {
-    console.error("GridFS upload error:", error);
-    res.status(500).json({ message: "Error uploading file to GridFS." });
-  });
+    uploadStream.on("error", (error) => {
+      console.error("GridFS upload error:", error);
+      res.status(500).json({ message: "Error uploading file to GridFS." });
+    });
 
-  uploadStream.on("finish", async () => {
-    try {
-      const photoDoc = new PhotoModel({
-        fileId: uploadStream.id,
-        filename: newFilename,
-        contentType: newMimetype,
-        username: username,
-        uniqueID: uuidv4(),
-        views: 0,
-      });
+    uploadStream.on("finish", async () => {
+      try {
+        const photoDoc = new PhotoModel({
+          fileId: uploadStream.id,
+          filename: newFilename,
+          contentType: newMimetype,
+          username: username,
+          uniqueID: uuidv4(),
+          views: 0,
+        });
 
-      await photoDoc.save();
+        await photoDoc.save();
 
-      res.status(201).json({
-        message: "File uploaded successfully.",
-        fileId: uploadStream.id,
-        photoDoc: photoDoc,
-      });
-    } catch (error) {
-      console.error("Error saving photo metadata:", error);
-      // If metadata save fails, delete the orphaned GridFS file.
-      gfs
-        .delete(uploadStream.id)
-        .catch((err) =>
-          console.error(
-            "Error deleting GridFS file after metadata save failure:",
-            err,
-          ),
-        );
-      res.status(500).json({ message: "Error saving photo metadata." });
-    }
-  });
+        res.status(201).json({
+          message: "File uploaded successfully.",
+          fileId: uploadStream.id,
+          photoDoc: photoDoc,
+        });
+      } catch (error) {
+        console.error("Error saving photo metadata:", error);
+        // If metadata save fails, delete the orphaned GridFS file.
+        gfs
+          .delete(uploadStream.id)
+          .catch((err) =>
+            console.error(
+              "Error deleting GridFS file after metadata save failure:",
+              err,
+            ),
+          );
+        res.status(500).json({ message: "Error saving photo metadata." });
+      }
+    });
   } catch (error) {
     console.error("Error processing image:", error);
     res.status(500).json({ message: "Error processing image upload." });
@@ -130,7 +137,10 @@ router.get("/photos", async (req, res) => {
     const skip = (page - 1) * limit;
 
     // Fetch photos sorted by newest first with pagination
-    const photos = await PhotoModel.find({}).sort({ _id: -1 }).skip(skip).limit(limit);
+    const photos = await PhotoModel.find({})
+      .sort({ _id: -1 })
+      .skip(skip)
+      .limit(limit);
 
     res.status(200).json(photos);
   } catch (error) {
@@ -138,5 +148,3 @@ router.get("/photos", async (req, res) => {
     res.status(500).json({ message: "Internal server error." });
   }
 });
-
-module.exports = router;
