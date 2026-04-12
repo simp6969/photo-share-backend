@@ -14,7 +14,100 @@ const router = express.Router();
 
 // ... your route logic goes here (e.g., router.post('/upload', ...))
 
+/**
+ * @route GET /migrate-to-webp
+ * @description Scans all photos and converts non-WebP images to WebP.
+ */
+router.get("/migrate-to-webp", async (req, res) => {
+  const gfs = getGfs();
+  try {
+    const photosToMigrate = await PhotoModel.find({
+      contentType: { $ne: "image/webp" },
+    });
+
+    if (photosToMigrate.length === 0) {
+      return res.json({ message: "No photos need migration." });
+    }
+
+    const results = {
+      total: photosToMigrate.length,
+      success: 0,
+      failed: 0,
+    };
+
+    for (const photo of photosToMigrate) {
+      try {
+        // 1. Download old image
+        const downloadStream = gfs.openDownloadStream(photo.fileId);
+        const chunks = [];
+        try {
+          for await (const chunk of downloadStream) {
+            chunks.push(chunk);
+          }
+        } catch (downloadError) {
+          console.error(`Error downloading file ${photo.fileId}:`, downloadError);
+          results.failed++;
+          continue;
+        }
+        
+        const buffer = Buffer.concat(chunks);
+
+        // 2. Convert to WebP using sharp and resize for efficiency
+        const webpBuffer = await sharp(buffer)
+          .resize({ width: 1920, height: 1080, fit: "inside", withoutEnlargement: true })
+          .webp({ quality: 80, effort: 6 })
+          .toBuffer();
+
+        const newFilename = `${photo.filename.replace(/\.[^/.]+$/, "")}.webp`;
+        const newMimetype = "image/webp";
+
+        // 3. Upload new WebP image to GridFS
+        const uploadStream = gfs.openUploadStream(newFilename, {
+          contentType: newMimetype,
+          metadata: { username: photo.username },
+        });
+
+        const readableStream = new Readable();
+        readableStream.push(webpBuffer);
+        readableStream.push(null);
+        
+        await new Promise((resolve, reject) => {
+          readableStream.pipe(uploadStream)
+            .on("finish", resolve)
+            .on("error", reject);
+        });
+
+        // 4. Update Photo metadata in MongoDB
+        const oldFileId = photo.fileId;
+        photo.fileId = uploadStream.id;
+        photo.filename = newFilename;
+        photo.contentType = newMimetype;
+        await photo.save();
+
+        // 5. Delete the original non-WebP file from GridFS to save space
+        try {
+          await gfs.delete(oldFileId);
+        } catch (deleteError) {
+          console.error(`Warning: Failed to delete old file ${oldFileId}:`, deleteError);
+          // We don't increment failure here because the new file is already saved and database updated
+        }
+
+        results.success++;
+      } catch (err) {
+        console.error(`Failed to migrate photo ${photo._id}:`, err);
+        results.failed++;
+      }
+    }
+
+    res.json({ message: "Migration complete", results });
+  } catch (error) {
+    console.error("Migration error:", error);
+    res.status(500).json({ message: "Migration failed", error: error.message });
+  }
+});
+
 export default router;
+
 // Use memory storage with multer
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
@@ -33,9 +126,10 @@ router.post("/upload", upload.single("photo"), async (req, res) => {
   const { username } = req.body;
 
   try {
-    // Process image with sharp: convert to webp and compress
+    // Process image with sharp: convert to webp, compress, and resize for efficient loading
     const processedBuffer = await sharp(buffer)
-      .webp({ quality: 80 })
+      .resize({ width: 1920, height: 1080, fit: "inside", withoutEnlargement: true })
+      .webp({ quality: 80, effort: 6 })
       .toBuffer();
 
     const newFilename = `${originalname.split(".")[0]}.webp`;
@@ -114,6 +208,8 @@ router.get("/image/:fileId", async (req, res) => {
     const file = files[0];
     res.set("Content-Type", file.contentType);
     res.set("Content-Disposition", `inline; filename="${file.filename}"`);
+    // Cache for 1 year since image contents are immutable
+    res.set("Cache-Control", "public, max-age=31536000, immutable");
 
     const downloadStream = gfs.openDownloadStream(fileId);
     downloadStream.pipe(res);
