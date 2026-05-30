@@ -9,6 +9,8 @@ const PhotoSchema = new Schema({
   views: Number,
 });
 
+PhotoSchema.index({ filename: "text", username: "text" });
+
 const PhotoModel = model("mainDB", PhotoSchema);
 
 export { PhotoModel };

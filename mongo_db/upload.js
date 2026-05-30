@@ -224,19 +224,41 @@ router.get("/image/:fileId", async (req, res) => {
 
 /**
  * @route GET /photos
- * @description Retrieves photo metadata in descending order with pagination.
+ * @description Cursor-based pagination (newest first). Supports optional search via ?q=
+ * @query limit - page size (default 24, max 50)
+ * @query cursor - last _id from previous page (fetch older items)
+ * @query q - search filename or username (case-insensitive)
  */
 router.get("/photos", async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    const skip = (page - 1) * limit;
+    const limit = Math.min(parseInt(req.query.limit, 10) || 24, 50);
+    const cursor = req.query.cursor;
+    const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
 
-    // Fetch photos sorted by newest first with pagination
-    const photos = await PhotoModel.find({})
-      .sort({ _id: -1 })
-      .skip(skip)
-      .limit(limit);
+    const filter = {};
+
+    if (q) {
+      const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const regex = new RegExp(escaped, "i");
+      filter.$or = [{ filename: regex }, { username: regex }];
+    }
+
+    let photos;
+
+    if (cursor) {
+      if (!mongoose.Types.ObjectId.isValid(cursor)) {
+        return res.status(400).json({ message: "Invalid cursor." });
+      }
+      filter._id = { $lt: new mongoose.Types.ObjectId(cursor) };
+      photos = await PhotoModel.find(filter).sort({ _id: -1 }).limit(limit);
+    } else {
+      const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+      const skip = (page - 1) * limit;
+      photos = await PhotoModel.find(filter)
+        .sort({ _id: -1 })
+        .skip(skip)
+        .limit(limit);
+    }
 
     res.status(200).json(photos);
   } catch (error) {
