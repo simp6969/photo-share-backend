@@ -175,15 +175,9 @@ router.get("/photos", async (req, res) => {
         return res.status(400).json({ message: "Invalid cursor." });
       }
       filter._id = { $lt: new mongoose.Types.ObjectId(cursor) };
-      photos = await PhotoModel.find(filter).sort({ _id: -1 }).limit(limit);
-    } else {
-      const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
-      const skip = (page - 1) * limit;
-      photos = await PhotoModel.find(filter)
-        .sort({ _id: -1 })
-        .skip(skip)
-        .limit(limit);
     }
+
+    photos = await PhotoModel.find(filter).sort({ _id: -1 }).limit(limit);
 
     res.status(200).json(photos);
   } catch (error) {
