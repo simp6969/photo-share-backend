@@ -8,7 +8,10 @@
         "node_modules/mongodb/**",
         "node_modules/bson/**",
         "node_modules/mongodb-connection-string-url/**",
-        "node_modules/@mongodb-js/saslprep/**"
+        "node_modules/@mongodb-js/saslprep/**",
+        "node_modules/heic-convert/**",
+        "node_modules/heic-decode/**",
+        "node_modules/libheif-js/**"
       ]
     }
   }

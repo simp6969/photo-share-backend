@@ -3,21 +3,23 @@ import multer from "multer";
 import { Readable } from "stream";
 import mongoose from "mongoose";
 import { v4 as uuidv4 } from "uuid";
-import sharp from "sharp";
 
-// Local imports - MUST include the .js extension
 import { getGfs } from "../mongo_db/mongodb.js";
 import { PhotoModel } from "../mongo_db/user.js";
+import {
+  isHeifFormat,
+  parseImageQuery,
+  processToWebp,
+  streamToBuffer,
+} from "../mongo_db/imageProcess.js";
 
-// Initialize the router
 const router = express.Router();
-
-// ... your route logic goes here (e.g., router.post('/upload', ...))
-
-export default router;
-// Use memory storage with multer
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
+
+function baseName(filename) {
+  return filename.replace(/\.[^/.]+$/, "") || "photo";
+}
 
 /**
  * @route POST /upload
@@ -29,19 +31,14 @@ router.post("/upload", upload.single("photo"), async (req, res) => {
   }
 
   const gfs = getGfs();
-  const { originalname, buffer } = req.file;
+  const { originalname, buffer, mimetype } = req.file;
   const { username } = req.body;
 
   try {
-    // Process image with sharp: convert to webp and compress
-    const processedBuffer = await sharp(buffer)
-      .webp({ quality: 80 })
-      .toBuffer();
-
-    const newFilename = `${originalname.split(".")[0]}.webp`;
+    const processedBuffer = await processToWebp(buffer, mimetype, originalname);
+    const newFilename = `${baseName(originalname)}.webp`;
     const newMimetype = "image/webp";
 
-    // Create a readable stream from the processed buffer
     const readablePhotoStream = new Readable();
     readablePhotoStream.push(processedBuffer);
     readablePhotoStream.push(null);
@@ -78,7 +75,6 @@ router.post("/upload", upload.single("photo"), async (req, res) => {
         });
       } catch (error) {
         console.error("Error saving photo metadata:", error);
-        // If metadata save fails, delete the orphaned GridFS file.
         gfs
           .delete(uploadStream.id)
           .catch((err) =>
@@ -92,13 +88,18 @@ router.post("/upload", upload.single("photo"), async (req, res) => {
     });
   } catch (error) {
     console.error("Error processing image:", error);
-    res.status(500).json({ message: "Error processing image upload." });
+    const hint = isHeifFormat(mimetype, originalname)
+      ? " HEIF/HEIC conversion failed — try exporting as JPEG or PNG."
+      : "";
+    res.status(400).json({
+      message: `Could not process image.${hint}`,
+    });
   }
 });
 
 /**
  * @route GET /image/:fileId
- * @description Streams an image from GridFS.
+ * @description Streams an image from GridFS. ?w=480&q=68 returns a smaller WebP thumbnail.
  */
 router.get("/image/:fileId", async (req, res) => {
   const gfs = getGfs();
@@ -112,8 +113,31 @@ router.get("/image/:fileId", async (req, res) => {
     }
 
     const file = files[0];
-    res.set("Content-Type", file.contentType);
-    res.set("Content-Disposition", `inline; filename="${file.filename}"`);
+    const contentType = file.contentType || "";
+    const filename = file.filename || "";
+    const { width, quality } = parseImageQuery(req.query);
+    const isHeif = isHeifFormat(contentType, filename);
+
+    if (isHeif || width) {
+      const downloadStream = gfs.openDownloadStream(fileId);
+      const rawBuffer = await streamToBuffer(downloadStream);
+      const webpBuffer = await processToWebp(rawBuffer, contentType, filename, {
+        width: width ?? undefined,
+        quality,
+      });
+
+      res.set("Content-Type", "image/webp");
+      res.set(
+        "Content-Disposition",
+        `inline; filename="${baseName(filename)}${width ? `-w${width}` : ""}.webp"`,
+      );
+      res.set("Cache-Control", "public, max-age=31536000, immutable");
+      return res.send(webpBuffer);
+    }
+
+    res.set("Content-Type", contentType || "application/octet-stream");
+    res.set("Content-Disposition", `inline; filename="${filename}"`);
+    res.set("Cache-Control", "public, max-age=31536000, immutable");
 
     const downloadStream = gfs.openDownloadStream(fileId);
     downloadStream.pipe(res);
@@ -129,9 +153,6 @@ router.get("/image/:fileId", async (req, res) => {
 /**
  * @route GET /photos
  * @description Cursor-based pagination (newest first). Supports optional search via ?q=
- * @query limit - page size (default 24, max 50)
- * @query cursor - last _id from previous page (fetch older items)
- * @query q - search filename or username (case-insensitive)
  */
 router.get("/photos", async (req, res) => {
   try {
@@ -170,3 +191,5 @@ router.get("/photos", async (req, res) => {
     res.status(500).json({ message: "Internal server error." });
   }
 });
+
+export default router;
